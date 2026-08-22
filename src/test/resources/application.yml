@@ -1,0 +1,19 @@
+spring:
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/seatbooking_test
+    username: test
+    password: test
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  redisson:
+    address: redis://localhost:6379
