@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineBook — Seat Booking System</title>
+    <meta name="description" content="Book your cinema seats instantly with real-time availability powered by Redis distributed locking.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Toast Container -->
+<div id="toast-container" aria-live="polite"></div>
+
+<!-- Auth Screen -->
+<div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <span class="logo-icon">🎬</span>
+            <span class="logo-text">CineBook</span>
+        </div>
+        <p class="auth-subtitle">Real-time concurrent seat booking</p>
+
+        <div class="tab-bar">
+            <button id="tab-login" class="tab-btn active" onclick="switchTab('login')">Login</button>
+            <button id="tab-register" class="tab-btn" onclick="switchTab('register')">Register</button>
+        </div>
+
+        <form id="auth-form" onsubmit="handleAuth(event)" novalidate>
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" placeholder="Enter username" autocomplete="username" required>
+            </div>
+
+            <div class="form-group hidden" id="email-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" placeholder="Enter email" autocomplete="email">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter password" autocomplete="current-password" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full" id="auth-btn">
+                <span id="auth-btn-text">Login</span>
+                <span id="auth-btn-spinner" class="spinner hidden"></span>
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- App Screen -->
+<div id="app-screen" class="app-screen hidden">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <span class="logo-icon">🎬</span>
+            <span class="logo-text">CineBook</span>
+        </div>
+
+        <div class="user-card">
+            <div class="user-avatar" id="user-avatar">A</div>
+            <div class="user-info">
+                <div class="user-name" id="username-display">User</div>
+                <div class="user-role">Member</div>
+            </div>
+            <button class="btn-icon" onclick="logout()" title="Logout">⏻</button>
+        </div>
+
+        <nav class="sidebar-nav">
+            <button class="nav-item active" id="nav-book" onclick="showPage('booking')">
+                <span class="nav-icon">🎟️</span> Book Seats
+            </button>
+            <button class="nav-item" id="nav-my" onclick="showPage('mybookings')">
+                <span class="nav-icon">📋</span> My Bookings
+            </button>
+        </nav>
+
+        <!-- Show List in Sidebar -->
+        <div class="sidebar-shows" id="sidebar-shows">
+            <div class="sidebar-section-title">NOW SHOWING</div>
+            <div id="show-list" class="show-list">
+                <div class="loading-shows">Loading shows...</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+        <!-- Booking Page -->
+        <div id="page-booking" class="page">
+            <div class="page-header">
+                <div>
+                    <h1 id="show-title-display">Select a Show</h1>
+                    <p class="page-subtitle" id="show-details-display">Choose a show from the sidebar to load the seat map</p>
+                </div>
+                <button class="btn btn-outline" onclick="refreshSeats()" id="refresh-btn" style="display:none;">
+                    ↻ Refresh
+                </button>
+            </div>
+
+            <!-- Screen indicator -->
+            <div id="screen-indicator" class="screen-indicator hidden">
+                <div class="screen-bar">SCREEN</div>
+            </div>
+
+            <!-- Seat Map -->
+            <div id="seat-map-container" class="seat-map-wrapper hidden">
+                <div id="seat-map" class="seat-map"></div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="empty-state" class="empty-state">
+                <div class="empty-icon">🎭</div>
+                <h2>No Show Selected</h2>
+                <p>Pick a show from the sidebar to see available seats</p>
+            </div>
+
+            <!-- Legend -->
+            <div id="legend" class="legend hidden">
+                <div class="legend-item"><span class="legend-dot available"></span> Available</div>
+                <div class="legend-item"><span class="legend-dot selected"></span> Selected</div>
+                <div class="legend-item"><span class="legend-dot held"></span> Held</div>
+                <div class="legend-item"><span class="legend-dot booked"></span> Booked</div>
+            </div>
+
+            <!-- Booking Panel -->
+            <div id="booking-panel" class="booking-panel hidden">
+                <div class="booking-info">
+                    <span class="booking-count" id="selected-count">0</span>
+                    <span class="booking-label">seats selected</span>
+                </div>
+                <div id="selected-seat-chips" class="seat-chips"></div>
+                <button id="book-btn" class="btn btn-primary btn-large" onclick="bookSeats()" disabled>
+                    <span id="book-btn-text">Book Now</span>
+                    <span id="book-btn-spinner" class="spinner hidden"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- My Bookings Page -->
+        <div id="page-mybookings" class="page hidden">
+            <div class="page-header">
+                <div>
+                    <h1>My Bookings</h1>
+                    <p class="page-subtitle">Your confirmed seat reservations</p>
+                </div>
+                <button class="btn btn-outline" onclick="loadMyBookings()">↻ Refresh</button>
+            </div>
+            <div id="my-bookings-list" class="bookings-list">
+                <div class="loading-placeholder">Loading your bookings...</div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
