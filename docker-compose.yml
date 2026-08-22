@@ -1,0 +1,81 @@
+version: '3.9'
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: seat-booking-db
+    environment:
+      POSTGRES_DB: seatbooking
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Anish123@
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "seatbooking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - seat-booking-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: seat-booking-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - seat-booking-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seat-booking-app
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/seatbooking
+      DB_USERNAME: postgres
+      DB_PASSWORD: Anish123@
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_USERNAME:
+      REDIS_PASSWORD:
+      JWT_SECRET: bXlfc3VwZXJfc2VjcmV0X2tleV9mb3Jfc2VhdF9ib29raW5nX3N5c3RlbV8yMDI0
+      JWT_EXPIRATION_MS: 86400000
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseContainerSupport"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - seat-booking-net
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  seat-booking-net:
+    driver: bridge
