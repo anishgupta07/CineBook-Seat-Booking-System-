@@ -32,6 +32,3 @@ build/
 ### VS Code ###
 .vscode/
 
-### Sensitive Config — never commit real credentials ###
-src/main/resources/application-local.yml
-src/main/resources/application-local.yaml

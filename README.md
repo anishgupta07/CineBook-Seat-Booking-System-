@@ -57,14 +57,13 @@ Spring Boot App (port 8080)
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for PostgreSQL + Redis)
-- Java 17+ (if running app locally)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — that's it.
 
 ---
 
-### Option A — Full Docker Compose (Recommended)
+### Running with Docker Compose
 
-Starts everything: PostgreSQL + Redis + Spring Boot app.
+Starts everything in one command: **PostgreSQL + Redis + Spring Boot app**.
 
 ```bash
 docker compose up --build
@@ -72,38 +71,35 @@ docker compose up --build
 
 Open **http://localhost:8080** in your browser.
 
----
-
-### Option B — Local Development (IDE)
-
-Start only the infrastructure with Docker, then run the app from your IDE or Maven.
+To stop:
 
 ```bash
-# 1. Start PostgreSQL + Redis
-docker compose up -d db redis
-
-# 2. Run the Spring Boot app
-./mvnw spring-boot:run
+docker compose down
 ```
 
-> ⚠️ **Redis is required.** The application will not start without a reachable Redis instance on `localhost:6379` (or the `REDIS_HOST`/`REDIS_PORT` environment variables).
+To stop and wipe all data volumes:
+
+```bash
+docker compose down -v
+```
 
 ---
 
 ## ⚙️ Configuration
 
-All settings have sensible defaults. Override with environment variables:
+All configuration is managed via environment variables in [`docker-compose.yml`](docker-compose.yml). No manual setup is needed.
 
-| Variable | Default | Description |
-|---|---|---|
-| `DB_URL` | `jdbc:postgresql://localhost:5432/seatbooking` | PostgreSQL JDBC URL |
-| `DB_USERNAME` | `postgres` | DB username |
-| `DB_PASSWORD` | `postgres` | DB password |
-| `REDIS_HOST` | `localhost` | Redis hostname |
-| `REDIS_PORT` | `6379` | Redis port |
-| `REDIS_PASSWORD` | *(empty)* | Redis password (if auth enabled) |
-| `JWT_SECRET` | *(base64 key)* | HMAC-SHA secret for JWT signing |
-| `JWT_EXPIRATION_MS` | `86400000` | Token TTL (24 hours) |
+| Variable | Description |
+|---|---|
+| `DB_URL` | PostgreSQL JDBC URL |
+| `DB_USERNAME` | DB username |
+| `DB_PASSWORD` | DB password |
+| `REDIS_HOST` | Redis hostname |
+| `REDIS_PORT` | Redis port |
+| `JWT_SECRET` | HMAC-SHA secret for JWT signing |
+| `JWT_EXPIRATION_MS` | Token TTL in milliseconds |
+
+To change any value, edit the `environment:` block under the `app` service in `docker-compose.yml`.
 
 ---
 
@@ -209,8 +205,10 @@ idempotency_key                                       response_body
 
 ## 🧪 Running Tests
 
+With the stack running (`docker compose up --build`), execute tests inside the app container:
+
 ```bash
-./mvnw test
+docker exec seat-booking-app ./mvnw test -f /app/pom.xml
 ```
 
 Concurrency tests are in `src/test/java/.../service/PessimisticConcurrencyTest.java`.
