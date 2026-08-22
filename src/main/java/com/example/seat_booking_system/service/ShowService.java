@@ -1,70 +1,74 @@
 package com.example.seat_booking_system.service;
 
 import com.example.seat_booking_system.dto.SeatDto;
+import com.example.seat_booking_system.dto.ShowDto;
 import com.example.seat_booking_system.entity.Seat;
-import com.example.seat_booking_system.entity.SeatStatus;
 import com.example.seat_booking_system.entity.Show;
 import com.example.seat_booking_system.repository.SeatRepository;
 import com.example.seat_booking_system.repository.ShowRepository;
+import java.util.List;
+import java.util.NoSuchElementException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.NoSuchElementException;
-
-// Step 9: Cache-aside pattern for seat availability — @Cacheable on read, @CacheEvict on write.
-// Cache key: "available-seats::{showId}" — TTL is 10s (see CacheConfig).
-// All seat-mutating services call evictSeatCache after status changes.
 @Service
 @RequiredArgsConstructor
 public class ShowService {
 
-    private final SeatRepository seatRepository;
-    private final ShowRepository showRepository;
+  private final SeatRepository seatRepository;
+  private final ShowRepository showRepository;
 
-    // Step 9.1: Returns AVAILABLE seats from Redis cache or DB on miss.
-    //           Cache key includes showId so each show has its own cache entry.
-    @Cacheable(value = "available-seats", key = "#showId")
-    @Transactional(readOnly = true)
-    public List<SeatDto> getAvailableSeats(Long showId) {
-        // Verify show exists first — fail fast with a clear error on cache miss.
-        showRepository.findById(showId)
-                .orElseThrow(() -> new NoSuchElementException("Show not found: " + showId));
+  /**
+   * Returns ALL seats for a show (AVAILABLE, HELD, BOOKED) so the frontend
+   * can render the full seat map with correct status colours.
+   * Result is cached in Redis for 10 s and evicted on every booking.
+   */
+  @Cacheable(value = "available-seats", key = "#showId")
+  @Transactional(readOnly = true)
+  public List<SeatDto> getAllSeats(Long showId) {
+    showRepository
+        .findById(showId)
+        .orElseThrow(() -> new NoSuchElementException("Show not found: " + showId));
 
-        return seatRepository.findByShowIdAndStatus(showId, SeatStatus.AVAILABLE)
-                .stream()
-                .map(this::toDto)
-                .toList();
-    }
+    return seatRepository.findByShowIdOrderBySeatNumberAsc(showId).stream()
+        .map(this::toDto)
+        .collect(java.util.stream.Collectors.toList());
+  }
 
-    // Step 9.2: Evicts the cache entry for this show — called by booking/hold/release after any status change.
-    //           No body needed; @CacheEvict is handled entirely by AOP proxy.
-    @CacheEvict(value = "available-seats", key = "#showId")
-    public void evictSeatCache(Long showId) {
-    }
+  @CacheEvict(value = "available-seats", key = "#showId")
+  public void evictSeatCache(Long showId) {}
 
-    // Maps Seat entity → SeatDto — hides internal fields like @Version, heldBy, heldAt.
-    public SeatDto toDto(Seat seat) {
-        return SeatDto.builder()
-                .id(seat.getId())
-                .seatNumber(seat.getSeatNumber())
-                .status(seat.getStatus())
-                .showId(seat.getShow().getId())
-                .build();
-    }
+  public SeatDto toDto(Seat seat) {
+    return SeatDto.builder()
+        .id(seat.getId())
+        .seatNumber(seat.getSeatNumber())
+        .status(seat.getStatus())
+        .showId(seat.getShow().getId())
+        .build();
+  }
 
-    // Admin/seeding helper — creates and persists a new Show.
-    @Transactional
-    public Show createShow(Show show) {
-        return showRepository.save(show);
-    }
+  @Transactional(readOnly = true)
+  public List<ShowDto> getAllShows() {
+    return showRepository.findAll().stream()
+        .map(s -> ShowDto.builder()
+            .id(s.getId())
+            .title(s.getTitle())
+            .venue(s.getVenue())
+            .startTime(s.getStartTime())
+            .build())
+        .collect(java.util.stream.Collectors.toList());
+  }
 
-    // Admin/seeding helper — creates and persists a new Seat.
-    @Transactional
-    public Seat createSeat(Seat seat) {
-        return seatRepository.save(seat);
-    }
+  @Transactional
+  public Show createShow(Show show) {
+    return showRepository.save(show);
+  }
+
+  @Transactional
+  public Seat createSeat(Seat seat) {
+    return seatRepository.save(seat);
+  }
 }

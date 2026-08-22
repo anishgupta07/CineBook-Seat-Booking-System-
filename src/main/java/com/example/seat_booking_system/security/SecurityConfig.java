@@ -18,67 +18,54 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-// Step 2: Spring Security config — defines public vs protected routes, installs JWT filter, sets stateless sessions.
-// CSRF disabled (irrelevant for JWT/Authorization-header auth).
-// BCrypt password encoder (cost factor 10 ≈ 10ms — slow enough to deter brute force).
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity  // Enables @PreAuthorize, @PostAuthorize on controller methods
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtAuthFilter jwtAuthFilter;
-    private final UserDetailsServiceImpl userDetailsService;
+  private final JwtAuthFilter jwtAuthFilter;
+  private final UserDetailsServiceImpl userDetailsService;
 
-    // Step 2.1: Main security filter chain — defines route permissions and registers JWT filter.
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-                // Step 2.2: Disable CSRF — not needed for stateless REST (no session cookies).
-                .csrf(AbstractHttpConfigurer::disable)
+  @Bean
+  public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    http.csrf(AbstractHttpConfigurer::disable)
+        .sessionManagement(
+            session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .authorizeHttpRequests(
+            auth ->
+                auth.requestMatchers(HttpMethod.GET, "/api/shows/**")
+                    .permitAll()
+                    .requestMatchers("/api/auth/**")
+                    .permitAll()
+                    .requestMatchers("/actuator/health")
+                    .permitAll()
+                    .requestMatchers("/", "/index.html", "/style.css", "/app.js", "/favicon.ico", "/error")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated())
+        .authenticationProvider(authenticationProvider())
+        .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-                // Step 2.3: STATELESS — no HttpSession created; every request must carry a JWT.
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+    return http.build();
+  }
 
-                // Step 2.4: Authorization rules — first match wins.
-                .authorizeHttpRequests(auth -> auth
-                        // Public: show browsing (no login required).
-                        .requestMatchers(HttpMethod.GET, "/api/shows/**").permitAll()
-                        // Public: auth endpoints.
-                        .requestMatchers("/api/auth/**").permitAll()
-                        // Public: Docker health check.
-                        .requestMatchers("/actuator/health").permitAll()
-                        // Everything else requires a valid JWT.
-                        .anyRequest().authenticated()
-                )
+  @Bean
+  public AuthenticationProvider authenticationProvider() {
+    DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+    provider.setUserDetailsService(userDetailsService);
+    provider.setPasswordEncoder(passwordEncoder());
+    return provider;
+  }
 
-                // Step 2.5: Register JWT filter BEFORE Spring's username/password filter.
-                .authenticationProvider(authenticationProvider())
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+  @Bean
+  public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+  }
 
-        return http.build();
-    }
-
-    // Step 2.6: DAO-based provider — loads user from DB and checks BCrypt hash.
-    @Bean
-    public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userDetailsService);
-        provider.setPasswordEncoder(passwordEncoder());
-        return provider;
-    }
-
-    // Step 2.7: BCrypt encoder — cost factor 10 is the default (~10ms on modern hardware).
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
-    // Step 2.8: Exposes AuthenticationManager as a bean so AuthService can call it.
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
-            throws Exception {
-        return config.getAuthenticationManager();
-    }
+  @Bean
+  public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
+      throws Exception {
+    return config.getAuthenticationManager();
+  }
 }
