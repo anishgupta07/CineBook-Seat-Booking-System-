@@ -17,6 +17,12 @@ import com.example.seat_booking_system.repository.SeatRepository;
 import com.example.seat_booking_system.repository.ShowRepository;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -139,5 +145,49 @@ class IdempotencyServiceTest {
     assertThat(bookingRepository.count())
         .as("Different idempotency keys should create separate bookings")
         .isEqualTo(2);
+  }
+
+  @Test
+  void createBooking_withConcurrentSameIdempotencyKey_allReturnIdenticalBookingId()
+      throws InterruptedException {
+    int threadCount = 5;
+    BookingRequest request =
+        new BookingRequest(testSeat.getShow().getId(), List.of(testSeat.getId()));
+
+    CountDownLatch startLatch = new CountDownLatch(1);
+    CountDownLatch doneLatch = new CountDownLatch(threadCount);
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+    Set<Long> bookingIds = ConcurrentHashMap.newKeySet();
+    AtomicInteger errors = new AtomicInteger(0);
+
+    for (int i = 0; i < threadCount; i++) {
+      executor.submit(
+          () -> {
+            try {
+              startLatch.await();
+              BookingResponse resp =
+                  bookingService.createBooking(request, testUser, "concurrent-key-999");
+              bookingIds.add(resp.getBookingId());
+            } catch (Exception e) {
+              errors.incrementAndGet();
+            } finally {
+              doneLatch.countDown();
+            }
+          });
+    }
+
+    startLatch.countDown();
+    doneLatch.await();
+    executor.shutdown();
+
+    assertThat(errors.get())
+        .as("All concurrent idempotent requests should succeed cleanly without crashing")
+        .isEqualTo(0);
+    assertThat(bookingIds)
+        .as("All requests should return the exact same booking ID")
+        .hasSize(1);
+    assertThat(bookingRepository.count()).isEqualTo(1);
+    assertThat(idempotencyRepository.count()).isEqualTo(1);
   }
 }

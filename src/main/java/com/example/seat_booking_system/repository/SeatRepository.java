@@ -24,6 +24,10 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
   @Query("SELECT s FROM Seat s WHERE s.id = :id")
   Optional<Seat> findByIdWithPessimisticLock(@Param("id") Long id);
 
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT s FROM Seat s WHERE s.id IN :ids ORDER BY s.id ASC")
+  List<Seat> findAllByIdInWithPessimisticLock(@Param("ids") List<Long> ids);
+
   @Query("SELECT s FROM Seat s WHERE s.status = 'HELD' AND s.heldAt < :expiryTime")
   List<Seat> findExpiredHolds(@Param("expiryTime") LocalDateTime expiryTime);
 

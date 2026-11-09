@@ -1,7 +1,10 @@
 package com.example.seat_booking_system.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.seat_booking_system.dto.BookingRequest;
+import com.example.seat_booking_system.dto.BookingResponse;
 import com.example.seat_booking_system.entity.AppUser;
 import com.example.seat_booking_system.entity.Role;
 import com.example.seat_booking_system.entity.Seat;
@@ -10,12 +13,15 @@ import com.example.seat_booking_system.entity.Show;
 import com.example.seat_booking_system.repository.AppUserRepository;
 import com.example.seat_booking_system.repository.BookingRepository;
 import com.example.seat_booking_system.repository.BookingSeatRepository;
+import com.example.seat_booking_system.repository.IdempotencyRepository;
 import com.example.seat_booking_system.repository.SeatRepository;
 import com.example.seat_booking_system.repository.ShowRepository;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,24 +58,28 @@ class PessimisticConcurrencyTest {
   }
 
   @Autowired private PessimisticBookingService pessimisticBookingService;
+  @Autowired private BookingService bookingService;
   @Autowired private SeatRepository seatRepository;
   @Autowired private ShowRepository showRepository;
   @Autowired private AppUserRepository userRepository;
   @Autowired private BookingRepository bookingRepository;
   @Autowired private BookingSeatRepository bookingSeatRepository;
+  @Autowired private IdempotencyRepository idempotencyRepository;
 
   private Long testSeatId;
   private AppUser testUser;
+  private Show testShow;
 
   @BeforeEach
   void setUp() {
+    idempotencyRepository.deleteAll();
     bookingSeatRepository.deleteAll();
     bookingRepository.deleteAll();
     seatRepository.deleteAll();
     showRepository.deleteAll();
     userRepository.deleteAll();
 
-    Show show =
+    testShow =
         showRepository.save(
             Show.builder()
                 .title("Pessimistic Lock Demo")
@@ -79,7 +89,7 @@ class PessimisticConcurrencyTest {
 
     Seat seat =
         seatRepository.save(
-            Seat.builder().seatNumber("PESS-1").status(SeatStatus.AVAILABLE).show(show).build());
+            Seat.builder().seatNumber("PESS-1").status(SeatStatus.AVAILABLE).show(testShow).build());
 
     testSeatId = seat.getId();
 
@@ -140,5 +150,120 @@ class PessimisticConcurrencyTest {
     Seat seat = seatRepository.findById(testSeatId).orElseThrow();
     assertThat(seat.getStatus()).isEqualTo(SeatStatus.BOOKED);
     assertThat(bookingRepository.count()).isEqualTo(1);
+  }
+
+  @Test
+  void pessimisticBooking_withOppositeSeatOrdering_preventsDeadlock()
+      throws InterruptedException {
+
+    Seat seatA =
+        seatRepository.save(
+            Seat.builder().seatNumber("SEAT-A").status(SeatStatus.AVAILABLE).show(testShow).build());
+    Seat seatB =
+        seatRepository.save(
+            Seat.builder().seatNumber("SEAT-B").status(SeatStatus.AVAILABLE).show(testShow).build());
+
+    AppUser user2 =
+        userRepository.save(
+            AppUser.builder()
+                .username("user2")
+                .email("user2@test.com")
+                .passwordHash("$2a$10$dummy")
+                .role(Role.USER)
+                .build());
+
+    int threadCount = 2;
+    CountDownLatch startLatch = new CountDownLatch(1);
+    CountDownLatch doneLatch = new CountDownLatch(threadCount);
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+    AtomicInteger successCount = new AtomicInteger(0);
+    AtomicInteger rejectionCount = new AtomicInteger(0);
+
+    // Thread 1 books [seatA, seatB]
+    executor.submit(
+        () -> {
+          try {
+            startLatch.await();
+            bookingService.createBooking(
+                new BookingRequest(testShow.getId(), List.of(seatA.getId(), seatB.getId())),
+                testUser,
+                "order-key-1");
+            successCount.incrementAndGet();
+          } catch (Exception e) {
+            rejectionCount.incrementAndGet();
+          } finally {
+            doneLatch.countDown();
+          }
+        });
+
+    // Thread 2 books in opposite order: [seatB, seatA]
+    executor.submit(
+        () -> {
+          try {
+            startLatch.await();
+            bookingService.createBooking(
+                new BookingRequest(testShow.getId(), List.of(seatB.getId(), seatA.getId())),
+                user2,
+                "order-key-2");
+            successCount.incrementAndGet();
+          } catch (Exception e) {
+            rejectionCount.incrementAndGet();
+          } finally {
+            doneLatch.countDown();
+          }
+        });
+
+    startLatch.countDown();
+    boolean completedInTime = doneLatch.await(5, TimeUnit.SECONDS);
+    executor.shutdown();
+
+    assertThat(completedInTime).as("Requests should complete without deadlock").isTrue();
+    assertThat(successCount.get()).as("Exactly one user should succeed").isEqualTo(1);
+    assertThat(rejectionCount.get()).as("The competing user should be cleanly rejected").isEqualTo(1);
+  }
+
+  @Test
+  void createBooking_whenSeatIsHeldByAnotherUser_isRejected() {
+    Seat heldSeat =
+        seatRepository.save(
+            Seat.builder()
+                .seatNumber("HELD-1")
+                .status(SeatStatus.HELD)
+                .heldBy("alice")
+                .heldAt(LocalDateTime.now())
+                .show(testShow)
+                .build());
+
+    BookingRequest request =
+        new BookingRequest(testShow.getId(), List.of(heldSeat.getId()));
+
+    assertThatThrownBy(() -> bookingService.createBooking(request, testUser, "hold-steal-attempt"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("held by another user");
+  }
+
+  @Test
+  void createBooking_whenSeatIsHeldBySameUser_isAllowed() {
+    Seat heldSeat =
+        seatRepository.save(
+            Seat.builder()
+                .seatNumber("HELD-MYSELF")
+                .status(SeatStatus.HELD)
+                .heldBy(testUser.getUsername())
+                .heldAt(LocalDateTime.now())
+                .show(testShow)
+                .build());
+
+    BookingRequest request =
+        new BookingRequest(testShow.getId(), List.of(heldSeat.getId()));
+
+    BookingResponse response =
+        bookingService.createBooking(request, testUser, "hold-self-book");
+
+    assertThat(response.getBookingId()).isNotNull();
+    Seat bookedSeat = seatRepository.findById(heldSeat.getId()).orElseThrow();
+    assertThat(bookedSeat.getStatus()).isEqualTo(SeatStatus.BOOKED);
+    assertThat(bookedSeat.getHeldBy()).isNull();
   }
 }

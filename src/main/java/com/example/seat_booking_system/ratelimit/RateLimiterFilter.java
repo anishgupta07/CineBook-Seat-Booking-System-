@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RRateLimiter;
@@ -49,6 +50,7 @@ public class RateLimiterFilter extends OncePerRequestFilter {
     RRateLimiter rateLimiter = redissonClient.getRateLimiter(rateLimiterKey);
 
     rateLimiter.trySetRate(RateType.OVERALL, requestsPerSecond, 1, RateIntervalUnit.SECONDS);
+    rateLimiter.expire(Duration.ofHours(1));
 
     if (!rateLimiter.tryAcquire()) {
       log.warn(

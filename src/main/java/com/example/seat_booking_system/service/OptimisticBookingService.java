@@ -41,7 +41,7 @@ public class OptimisticBookingService {
     try {
 
       seat.setStatus(SeatStatus.BOOKED);
-      seatRepository.save(seat);
+      seatRepository.saveAndFlush(seat);
 
       Booking booking =
           Booking.builder()

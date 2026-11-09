@@ -20,12 +20,15 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @RequiredArgsConstructor
@@ -42,7 +45,14 @@ public class BookingService {
   @Transactional
   public BookingResponse createBooking(
       BookingRequest request, AppUser user, String idempotencyKey) {
+    return createBooking(request, user, idempotencyKey, false);
+  }
 
+  @Transactional
+  public BookingResponse createBooking(
+      BookingRequest request, AppUser user, String idempotencyKey, boolean simulateDelay) {
+
+    // 1. Check if this request was already processed
     Optional<IdempotencyRecord> existingRecord =
         idempotencyRepository.findByIdempotencyKey(idempotencyKey);
 
@@ -53,20 +63,49 @@ public class BookingService {
       return deserializeResponse(existingRecord.get().getResponseBody());
     }
 
+    // 2. Sort and deduplicate seat IDs to eliminate deadlocks from cross-ordered concurrent requests
+    List<Long> orderedSeatIds =
+        request.getSeatIds().stream().distinct().sorted().toList();
+
     List<Seat> seatsToBook = new ArrayList<>();
-    for (Long seatId : request.getSeatIds()) {
+    for (Long seatId : orderedSeatIds) {
       Seat seat =
           seatRepository
               .findByIdWithPessimisticLock(seatId)
               .orElseThrow(() -> new IllegalArgumentException("Seat not found: " + seatId));
 
-      if (seat.getStatus() != SeatStatus.AVAILABLE && seat.getStatus() != SeatStatus.HELD) {
+      if (seat.getStatus() == SeatStatus.HELD) {
+        // Enforce hold ownership: only the user who held the seat may book it
+        if (seat.getHeldBy() == null || !seat.getHeldBy().equals(user.getUsername())) {
+          throw new IllegalStateException(
+              "Seat " + seatId + " is held by another user (" + seat.getHeldBy() + ")");
+        }
+      } else if (seat.getStatus() != SeatStatus.AVAILABLE) {
+        // If seat is already BOOKED, check if a concurrent request with the same idempotency key finished while we waited
+        Optional<IdempotencyRecord> concurrentRecord =
+            idempotencyRepository.findByIdempotencyKey(idempotencyKey);
+        if (concurrentRecord.isPresent()) {
+          log.info("[IDEMPOTENCY] Key '{}' completed concurrently — returning cached response", idempotencyKey);
+          return deserializeResponse(concurrentRecord.get().getResponseBody());
+        }
         throw new IllegalStateException(
             "Seat " + seatId + " is not bookable (status=" + seat.getStatus() + ")");
       }
       seatsToBook.add(seat);
     }
 
+    // 3. Optional simulated processing delay (e.g. payment gateway) while holding the pessimistic lock
+    // This allows human manual testing across two browser windows without microsecond mouse coordination!
+    if (simulateDelay) {
+      try {
+        log.info("[CONCURRENCY DEMO] Holding DB lock on seat(s) for 2.5 seconds to simulate real-world processing...");
+        Thread.sleep(2500);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    // 4. Mark seats as BOOKED
     seatsToBook.forEach(
         seat -> {
           seat.setStatus(SeatStatus.BOOKED);
@@ -75,6 +114,7 @@ public class BookingService {
           seatRepository.save(seat);
         });
 
+    // 5. Create and persist booking record
     Booking booking =
         Booking.builder()
             .user(user)
@@ -92,19 +132,34 @@ public class BookingService {
               .priceAtBooking(java.math.BigDecimal.ZERO)
               .build();
       bookingSeatRepository.save(bs);
+    }
 
-      showService.evictSeatCache(seat.getShow().getId());
+    // 6. Evict Redis seat cache AFTER transaction commit to prevent dirty read race conditions
+    Set<Long> showIdsToEvict =
+        seatsToBook.stream().map(s -> s.getShow().getId()).collect(Collectors.toSet());
+
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              showIdsToEvict.forEach(showService::evictSeatCache);
+            }
+          });
+    } else {
+      showIdsToEvict.forEach(showService::evictSeatCache);
     }
 
     BookingResponse response =
         BookingResponse.builder()
             .bookingId(booking.getId())
             .status(booking.getStatus())
-            .seatIds(request.getSeatIds())
+            .seatIds(orderedSeatIds)
             .createdAt(booking.getCreatedAt())
             .message("Booking confirmed")
             .build();
 
+    // 7. Save idempotency record
     try {
       IdempotencyRecord record =
           IdempotencyRecord.builder()
@@ -118,7 +173,7 @@ public class BookingService {
     } catch (DataIntegrityViolationException e) {
       log.warn("[IDEMPOTENCY] Concurrent duplicate for key '{}' — ignored", idempotencyKey);
     } catch (JsonProcessingException e) {
-      log.error("[IDEMPOTENCY] Failed to serialize response for key '{}'\n", idempotencyKey, e);
+      log.error("[IDEMPOTENCY] Failed to serialize response for key '{}'", idempotencyKey, e);
     }
 
     log.info("[IDEMPOTENCY] Created new booking {} for key '{}'", booking.getId(), idempotencyKey);

@@ -62,12 +62,14 @@ public class HoldExpiryScheduler {
           holdExpiryMinutes);
 
       for (Seat seat : expiredSeats) {
+        String prevHeldBy = seat.getHeldBy();
+        LocalDateTime prevHeldAt = seat.getHeldAt();
         seatHoldService.releaseHold(seat);
         log.info(
             "[SCHEDULER] Released hold on seat {} (was held by {}, heldAt={})",
             seat.getId(),
-            seat.getHeldBy(),
-            seat.getHeldAt());
+            prevHeldBy,
+            prevHeldAt);
       }
 
     } catch (InterruptedException e) {

@@ -17,3 +17,8 @@ spring:
 
   redisson:
     address: redis://localhost:6379
+
+app:
+  jwt:
+    secret: bXlfc3VwZXJfc2VjcmV0X2tleV9mb3Jfc2VhdF9ib29raW5nX3N5c3RlbV8yMDI0
+    expiration-ms: 86400000

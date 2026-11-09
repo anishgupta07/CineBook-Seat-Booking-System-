@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @RequiredArgsConstructor
@@ -36,21 +38,52 @@ public class SeatHoldService {
     seat.setHeldAt(LocalDateTime.now());
     seatRepository.save(seat);
 
-    showService.evictSeatCache(seat.getShow().getId());
+    evictCacheAfterCommit(seat.getShow().getId());
 
     log.info("[HOLD] User {} placed hold on seat {}", username, seatId);
     return true;
   }
 
   @Transactional
+  public boolean releaseHold(Long seatId, String username) {
+    Seat seat =
+        seatRepository
+            .findByIdWithPessimisticLock(seatId)
+            .orElseThrow(() -> new NoSuchElementException("Seat not found: " + seatId));
+
+    if (seat.getStatus() != SeatStatus.HELD || !username.equals(seat.getHeldBy())) {
+      log.warn("[HOLD] Cannot release hold on seat {} — not held by user {}", seatId, username);
+      return false;
+    }
+
+    releaseHold(seat);
+    return true;
+  }
+
+  @Transactional
   public void releaseHold(Seat seat) {
+    String previousHolder = seat.getHeldBy();
     seat.setStatus(SeatStatus.AVAILABLE);
     seat.setHeldBy(null);
     seat.setHeldAt(null);
     seatRepository.save(seat);
 
-    showService.evictSeatCache(seat.getShow().getId());
+    evictCacheAfterCommit(seat.getShow().getId());
 
-    log.info("[HOLD] Released hold on seat {} (was held by {})", seat.getId(), seat.getHeldBy());
+    log.info("[HOLD] Released hold on seat {} (was held by {})", seat.getId(), previousHolder);
+  }
+
+  private void evictCacheAfterCommit(Long showId) {
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              showService.evictSeatCache(showId);
+            }
+          });
+    } else {
+      showService.evictSeatCache(showId);
+    }
   }
 }

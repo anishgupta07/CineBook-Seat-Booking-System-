@@ -323,7 +323,8 @@ async function bookSeats() {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
-                'Idempotency-Key': generateUUID()
+                'Idempotency-Key': generateUUID(),
+                'X-Simulate-Delay': 'true'
             },
             body: JSON.stringify({ showId: Number(currentShowId), seatIds: seatIdsArray })
         });
@@ -352,6 +353,50 @@ async function bookSeats() {
         btnText.classList.remove('hidden');
         btnSpinner.classList.add('hidden');
     }
+}
+
+// ── Simulate Microsecond Race (0ms gap) ────────────────────
+async function simulateRace() {
+    if (!selectedSeatIds.size) return;
+    const seatId = Array.from(selectedSeatIds)[0];
+    showToast('info', 'Race Started! 🏁', `Firing 2 simultaneous requests for Seat ${seatId}...`);
+
+    const sendBooking = (userLabel) => fetch('/api/bookings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'Idempotency-Key': generateUUID()
+        },
+        body: JSON.stringify({ showId: Number(currentShowId), seatIds: [seatId] })
+    }).then(async res => {
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { data = { message: text }; }
+        return { userLabel, status: res.status, data };
+    });
+
+    try {
+        const [req1, req2] = await Promise.all([sendBooking('Request 1'), sendBooking('Request 2')]);
+
+        if (req1.status === 200) {
+            showToast('success', 'Request 1: WON! 🎉', `Booking #${req1.data.bookingId} confirmed`);
+        } else {
+            showToast('error', 'Request 1: REJECTED', req1.data.message || 'Conflict');
+        }
+
+        if (req2.status === 200) {
+            showToast('success', 'Request 2: WON! 🎉', `Booking #${req2.data.bookingId} confirmed`);
+        } else {
+            showToast('error', 'Request 2: REJECTED 🛑', req2.data.message || 'Seat not bookable (409 Conflict)');
+        }
+    } catch (err) {
+        showToast('error', 'Race Error', 'Failed to execute race requests.');
+    }
+
+    selectedSeatIds.clear();
+    updateBookingPanel();
+    setTimeout(() => fetchSeats(currentShowId), 1500);
 }
 
 // ── My Bookings ───────────────────────────────────────────

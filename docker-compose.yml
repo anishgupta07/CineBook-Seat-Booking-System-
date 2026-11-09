@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: seatbooking
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: Anish123@
+      POSTGRES_PASSWORD: "Anish123@"
     ports:
       - "5432:5432"
     volumes:
@@ -48,7 +48,7 @@ services:
     environment:
       DB_URL: jdbc:postgresql://db:5432/seatbooking
       DB_USERNAME: postgres
-      DB_PASSWORD: Anish123@
+      DB_PASSWORD: "Anish123@"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_USERNAME:

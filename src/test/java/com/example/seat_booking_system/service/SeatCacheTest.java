@@ -124,6 +124,10 @@ class SeatCacheTest {
         .as("After cache eviction, should see all 2 seats (1 available, 1 booked)")
         .hasSize(2);
 
+    assertThat(afterEviction.stream().anyMatch(s -> s.getStatus() == SeatStatus.BOOKED))
+        .as("After cache eviction, the updated BOOKED status must be visible")
+        .isTrue();
+
     System.out.println("[CACHE TEST] Cache eviction confirmed — post-eviction call hit DB");
   }
 }

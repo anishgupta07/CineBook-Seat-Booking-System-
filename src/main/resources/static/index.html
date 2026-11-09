@@ -136,10 +136,15 @@
                     <span class="booking-label">seats selected</span>
                 </div>
                 <div id="selected-seat-chips" class="seat-chips"></div>
-                <button id="book-btn" class="btn btn-primary btn-large" onclick="bookSeats()" disabled>
-                    <span id="book-btn-text">Book Now</span>
-                    <span id="book-btn-spinner" class="spinner hidden"></span>
-                </button>
+                <div style="display:flex;gap:0.75rem;align-items:center;">
+                    <button id="book-btn" class="btn btn-primary btn-large" onclick="bookSeats()" disabled>
+                        <span id="book-btn-text">Book Now (2.5s Lock)</span>
+                        <span id="book-btn-spinner" class="spinner hidden"></span>
+                    </button>
+                    <button id="race-btn" class="btn btn-large" style="background:#eab308;color:#0f172a;font-weight:700;border:none;" onclick="simulateRace()" title="Fires 2 simultaneous requests with 0ms gap to test conflict">
+                        ⚡ 1-Click Race Test
+                    </button>
+                </div>
             </div>
         </div>
 

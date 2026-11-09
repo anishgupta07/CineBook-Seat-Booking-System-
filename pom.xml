@@ -151,8 +151,6 @@
             <version>2.6.0</version>
         </dependency>
 
-
-
     </dependencies>
 
     <build>
@@ -162,7 +160,6 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
@@ -186,7 +183,14 @@
                 </configuration>
             </plugin>
 
-
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+                    <useSystemClassLoader>false</useSystemClassLoader>
+                </configuration>
+            </plugin>
 
         </plugins>
     </build>
